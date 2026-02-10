@@ -8,8 +8,6 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 add_library(ttsinfer
-    src/json.cpp
-    src/safetensors.cpp
     src/graph.cpp
     src/tensor.cpp
 )
