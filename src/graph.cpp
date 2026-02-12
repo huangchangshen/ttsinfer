@@ -1,9 +1,8 @@
-#include "ttsinfer.h"
 #include "graph.h"
 #include <iostream>
 #include <algorithm>
-#include <unordered_set>
-
+#include <stdexcept>
+#include <memory>
 
 namespace ttsinfer {
 
@@ -26,9 +25,27 @@ static void print_shape(const Tensor* t) {
     std::cout << "]";
 }
 
+Graph::Graph() = default;
+
+Graph::Graph(const backend::Backend& backend)
+    : backend_(std::make_unique<backend::Backend>(backend)) {}
+
+void Graph::compute_forward() {
+    if (!backend_) {
+        throw std::runtime_error("backend is not set");
+    }
+
+    for (Tensor* t : nodes_) {
+        if (is_leaf(*t)) continue;
+        if (!t->data()) {
+            t->allocate();
+        }
+        backend_->dispatch(t);
+    }
+}
+
 void Graph::dump() const {
-    std::cout << "Graph dump\n";
-    std::cout << "==========\n\n";
+    std::cout << "Graph dump\n==========\n\n";
 
     std::cout << "[Leafs]\n";
     for (const Tensor* t : leafs_) {
@@ -56,7 +73,7 @@ void Graph::dump() const {
     std::cout << std::endl;
 }
 
-static void visit_dfs(
+void Graph::visit_dfs(
     Tensor* t,
     std::unordered_set<Tensor*>& visiting,
     std::unordered_set<Tensor*>& visited,
@@ -64,9 +81,7 @@ static void visit_dfs(
     std::vector<Tensor*>& leafs,
     std::vector<Tensor*>& stack
 ) {
-    if (visited.count(t)) {
-        return;
-    }
+    if (visited.count(t)) return;
 
     if (visiting.count(t)) {
         std::string msg = "cycle detected: ";
@@ -97,6 +112,22 @@ static void visit_dfs(
 
 Graph Graph::build_forward(Tensor* out) {
     Graph g;
+
+    std::unordered_set<Tensor*> visiting;
+    std::unordered_set<Tensor*> visited;
+    std::vector<Tensor*> stack;
+
+    g.nodes_.reserve(64);
+    g.leafs_.reserve(32);
+    stack.reserve(16);
+
+    visit_dfs(out, visiting, visited, g.nodes_, g.leafs_, stack);
+
+    return g;
+}
+
+Graph Graph::build_forward(Tensor* out, const backend::Backend& backend) {
+    Graph g(backend);
 
     std::unordered_set<Tensor*> visiting;
     std::unordered_set<Tensor*> visited;

@@ -1,6 +1,7 @@
 #include "ttsinfer.h"
 #include <cstring>
 #include <stdexcept>
+#include <utility> // for std::move
 
 namespace ttsinfer {
 
@@ -17,21 +18,73 @@ static std::size_t element_size(DType dt) {
     }
 }
 
-static void compute_strides(Tensor& t) {
-    if (t.ndim() == 0) return;
-   
-    std::size_t* strides = const_cast<std::size_t*>(t.stride());
-    const int* shape = t.shape();
+// Move constructor
+Tensor::Tensor(Tensor&& other) noexcept 
+    : name_(std::move(other.name_)), op_(other.op_), ndim_(other.ndim_),
+      data_(other.data_), dtype_(other.dtype_), mem_type_(other.mem_type_),
+      num_inputs_(other.num_inputs_), view_src_(other.view_src_)
+{
+    std::memcpy(shape_, other.shape_, sizeof(shape_));
+    std::memcpy(stride_, other.stride_, sizeof(stride_));
+    std::memcpy(inputs_, other.inputs_, sizeof(inputs_));
     
-    strides[t.ndim() - 1] = 1;
-    if (t.ndim() > 1) {
-        for (int i = static_cast<int>(t.ndim()) - 2; i >= 0; --i) {
-            strides[i] = strides[i + 1] * shape[i + 1];
-        }
-    }
+    // Steal ownership
+    other.data_ = nullptr;
+    other.ndim_ = 0;
+    other.num_inputs_ = 0;
+    other.mem_type_ = MemType::EXTERNAL; // Safety
 }
 
-static void init_shape(Tensor& t, const std::array<int, kMaxDims>& shp) {
+// Move assignment
+Tensor& Tensor::operator=(Tensor&& other) noexcept {
+    if (this != &other) {
+        // Free current if owned
+        if (data_ && mem_type_ == MemType::OWNED) {
+            switch (dtype_) {
+                case DType::F32: delete[] static_cast<float*>(data_); break;
+                case DType::I32: delete[] static_cast<int*>(data_); break;
+                default: break; 
+            }
+        }
+        
+        // Move
+        name_ = std::move(other.name_);
+        op_ = other.op_;
+        ndim_ = other.ndim_;
+        std::memcpy(shape_, other.shape_, sizeof(shape_));
+        std::memcpy(stride_, other.stride_, sizeof(stride_));
+        data_ = other.data_;
+        dtype_ = other.dtype_;
+        mem_type_ = other.mem_type_;
+        num_inputs_ = other.num_inputs_;
+        std::memcpy(inputs_, other.inputs_, sizeof(inputs_));
+        view_src_ = other.view_src_;
+        
+        // Reset source
+        other.data_ = nullptr;
+        other.ndim_ = 0;
+        other.num_inputs_ = 0;
+        other.mem_type_ = MemType::EXTERNAL;
+    }
+    return *this;
+}
+
+void Tensor::allocate() {
+    if (data_) return;
+    // If we are just a view or external, we don't allocate
+    if (mem_type_ != MemType::OWNED) return;
+    
+    size_t num_elements = 1;
+    for(size_t i=0; i<ndim_; ++i) num_elements *= shape_[i];
+
+    size_t sz = num_elements * element_size(dtype_);
+    if (sz > 0) {
+        switch (dtype_) {
+            case DType::F32: data_ = new float[num_elements]; break;
+            case DType::I32: data_ = new int[num_elements]; break;
+            default: break;
+        }
+    }
 }
 
 Tensor Tensor::empty(const std::array<int, kMaxDims>& shp, DType dt) {
@@ -57,15 +110,10 @@ Tensor Tensor::empty(const std::array<int, kMaxDims>& shp, DType dt) {
 
     size_t sz = num_elements * element_size(dt);
     if (sz > 0) {
-        
         switch (dt) {
             case DType::F32: t.data_ = new float[num_elements]; break;
             case DType::I32: t.data_ = new int[num_elements]; break;
-
-            default: 
-                if (dt == DType::I64) t.data_ = new long long[num_elements]; 
-                t.data_ = new float[num_elements];
-                break;
+            default: break;
         }
     }
     
@@ -84,6 +132,7 @@ Tensor Tensor::zeros(const std::array<int, kMaxDims>& shp, DType dt) {
     return t;
 }
 
+
 Tensor Tensor::ones(const std::array<int, kMaxDims>& shp, DType dt) {
     Tensor t = empty(shp, dt);
     std::size_t num_elements = 1;
@@ -96,6 +145,36 @@ Tensor Tensor::ones(const std::array<int, kMaxDims>& shp, DType dt) {
         int* p = static_cast<int*>(t.data_);
         for(size_t i=0; i<num_elements; ++i) p[i] = 1;
     }
+    return t;
+}
+
+Tensor Tensor::eye(const std::array<int, kMaxDims>& shp, DType dt) {
+    if (shp[0] <= 0 || shp[1] <= 0) {
+        throw std::runtime_error("eye requires at least 2D shape");
+    }
+
+    Tensor t = empty(shp, dt);
+    std::size_t rows = shp[0];
+    std::size_t cols = shp[1];
+
+    if (dt == DType::F32) {
+        float* p = static_cast<float*>(t.data_);
+        std::fill(p, p + rows*cols, 0.f);
+        std::size_t diag = std::min(rows, cols);
+        for (std::size_t i = 0; i < diag; ++i) {
+            p[i*cols + i] = 1.f;
+        }
+    } else if (dt == DType::I32) {
+        int* p = static_cast<int*>(t.data_);
+        std::fill(p, p + rows*cols, 0);
+        std::size_t diag = std::min(rows, cols);
+        for (std::size_t i = 0; i < diag; ++i) {
+            p[i*cols + i] = 1;
+        }
+    } else {
+        throw std::runtime_error("unsupported dtype for eye()");
+    }
+
     return t;
 }
 

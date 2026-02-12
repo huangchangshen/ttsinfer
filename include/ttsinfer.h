@@ -15,17 +15,34 @@ namespace ttsinfer {
 inline constexpr std::size_t kMaxDims   = 4;
 inline constexpr std::size_t kMaxInputs = 4;
 
-enum class OpType { NONE=0, MATMUL, ADD, RELU, Count };
+enum class OpType {
+    NONE = 0,
+    MATMUL,
+    ADD,
+    RELU,
+    TRANSPOSE,
+    SOFTMAX,
+    Count
+};
+
 enum class DType   { F16, F32, BF16, I32, I64, U8, BOOL };
 enum class MemType { OWNED, VIEW, EXTERNAL };
 
 class Tensor {
 public:
     friend Tensor matmul(Tensor* a, Tensor* b);
+    friend Tensor transpose(Tensor* a);
 
     Tensor();
     Tensor(OpType type, std::initializer_list<Tensor*> ins);
     ~Tensor();
+
+    Tensor(Tensor&& other) noexcept;
+    Tensor& operator=(Tensor&& other) noexcept;
+    Tensor(const Tensor&) = delete;
+    Tensor& operator=(const Tensor&) = delete;
+
+    void allocate();
 
     Tensor& name(const char* fmt, ...);
 
@@ -33,8 +50,18 @@ public:
     OpType op() const { return op_; }
     std::size_t ndim() const { return ndim_; }
     const int* shape() const { return shape_; }
+    int shape(int i) const { return shape_[i]; }
     const std::size_t* stride() const { return stride_; }
     void* data() const { return data_; }
+    template<typename T>
+    T* data() const { return static_cast<T*>(data_); }
+    // template<typename T>
+    // T& data() const { return *static_cast<T*>(data_); }
+    int numel() const {
+        int n = 1;
+        for(size_t i=0; i<ndim_; ++i) n *= shape_[i];
+        return n;
+    }
     DType dtype() const { return dtype_; }
     MemType mem_type() const { return mem_type_; }
     std::size_t num_inputs() const { return num_inputs_; }
@@ -44,11 +71,10 @@ public:
     }
     Tensor* view_src() const { return view_src_; }
 
-
-
     static Tensor empty(const std::array<int, kMaxDims>& shp, DType dt = DType::F32);
     static Tensor zeros(const std::array<int, kMaxDims>& shp, DType dt = DType::F32);
     static Tensor ones(const std::array<int, kMaxDims>& shp, DType dt = DType::F32);
+    static Tensor eye(const std::array<int, kMaxDims>& shp, DType dt = DType::F32);
     static Tensor from_data(void* raw_data, const std::array<int, kMaxDims>& shp,
                             DType dt = DType::F32, MemType mt = MemType::EXTERNAL);
 
@@ -96,6 +122,21 @@ inline Tensor relu(Tensor* a) {
     return Tensor(OpType::RELU, {a});
 }
 
+inline Tensor transpose(Tensor* a) {
+    Tensor t(OpType::TRANSPOSE, {a});
+    if (t.ndim() == 2) {
+        t.shape_[0] = a->shape()[1];
+        t.shape_[1] = a->shape()[0];
+        t.stride_[0] = t.shape_[1];
+        t.stride_[1] = 1;
+    }
+    return t;
+}
+
+inline Tensor softmax(Tensor* a) {
+    return Tensor(OpType::SOFTMAX, {a});
+}
+
 inline Tensor::Tensor() {
     assign_name_if_empty();
 }
@@ -110,6 +151,7 @@ inline Tensor::Tensor(OpType type, std::initializer_list<Tensor*> ins)
 
     if (num_inputs_ > 0) {
         ndim_ = inputs_[0]->ndim();
+        dtype_ = inputs_[0]->dtype();
         for (std::size_t i = 0; i < ndim_; ++i) {
             shape_[i] = inputs_[0]->shape()[i];
             stride_[i] = inputs_[0]->stride()[i];
