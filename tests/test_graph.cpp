@@ -124,7 +124,7 @@ void test_transformer_block() {
     Tensor W1 = Tensor::eye({dim, ff_dim}, DType::F32); W1.name("W1");
     Tensor W2 = Tensor::eye({ff_dim, dim}, DType::F32); W2.name("W2");
 
-    // Inline transformer_block to keep tensors alive
+
     Tensor Q = matmul(&X, &Wq); Q.name("Q");
     Tensor K = matmul(&X, &Wk); K.name("K");
     Tensor V = matmul(&X, &Wv); V.name("V");

@@ -34,3 +34,4 @@
 /.vscode/
 /*.code-workspace
 /.windsurf/
+/build/

@@ -1,7 +1,7 @@
 #include "ttsinfer.h"
 #include <cstring>
 #include <stdexcept>
-#include <utility> // for std::move
+#include <utility>
 
 namespace ttsinfer {
 
@@ -18,7 +18,6 @@ static std::size_t element_size(DType dt) {
     }
 }
 
-// Move constructor
 Tensor::Tensor(Tensor&& other) noexcept 
     : name_(std::move(other.name_)), op_(other.op_), ndim_(other.ndim_),
       data_(other.data_), dtype_(other.dtype_), mem_type_(other.mem_type_),
@@ -28,17 +27,16 @@ Tensor::Tensor(Tensor&& other) noexcept
     std::memcpy(stride_, other.stride_, sizeof(stride_));
     std::memcpy(inputs_, other.inputs_, sizeof(inputs_));
     
-    // Steal ownership
+
     other.data_ = nullptr;
     other.ndim_ = 0;
     other.num_inputs_ = 0;
-    other.mem_type_ = MemType::EXTERNAL; // Safety
+    other.mem_type_ = MemType::EXTERNAL; 
 }
 
-// Move assignment
 Tensor& Tensor::operator=(Tensor&& other) noexcept {
     if (this != &other) {
-        // Free current if owned
+
         if (data_ && mem_type_ == MemType::OWNED) {
             switch (dtype_) {
                 case DType::F32: delete[] static_cast<float*>(data_); break;
@@ -47,7 +45,6 @@ Tensor& Tensor::operator=(Tensor&& other) noexcept {
             }
         }
         
-        // Move
         name_ = std::move(other.name_);
         op_ = other.op_;
         ndim_ = other.ndim_;
@@ -60,7 +57,6 @@ Tensor& Tensor::operator=(Tensor&& other) noexcept {
         std::memcpy(inputs_, other.inputs_, sizeof(inputs_));
         view_src_ = other.view_src_;
         
-        // Reset source
         other.data_ = nullptr;
         other.ndim_ = 0;
         other.num_inputs_ = 0;
@@ -71,7 +67,7 @@ Tensor& Tensor::operator=(Tensor&& other) noexcept {
 
 void Tensor::allocate() {
     if (data_) return;
-    // If we are just a view or external, we don't allocate
+
     if (mem_type_ != MemType::OWNED) return;
     
     size_t num_elements = 1;
