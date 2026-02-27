@@ -33,6 +33,8 @@
 #include <cassert>
 #include <iostream>
 #include "safetensors.h"
+
+using namespace ttsinfer;
 using namespace ttsinfer::safetensors;
 
 int main() {
@@ -40,7 +42,7 @@ int main() {
 
     assert(f.contains("linear.weight"));
 
-    auto t = f.getTensor("linear.weight");
+    auto t = f.get_tensor("linear.weight");
 
     assert(t.dtype() == DType::F32);
     assert(t.shape()[0] == 2);

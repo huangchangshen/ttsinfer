@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ttsinfer.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -7,17 +8,6 @@
 
 namespace ttsinfer {
 namespace safetensors {
-
-enum class DType {
-    F16,
-    F32,
-    BF16,
-    I32,
-    I64,
-    U8,
-    BOOL,
-    UNKNOWN
-};
 
 size_t dtypeSize(DType t);
 
@@ -46,7 +36,7 @@ public:
     ~SafeOpen();
 
     bool contains(const std::string& tensorName) const;
-    TensorView getTensor(const std::string& tensorName) const;
+    TensorView get_tensor(const std::string& tensorName) const;
 
     std::vector<std::string> keys() const;
 

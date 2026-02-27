@@ -119,7 +119,7 @@ bool SafeOpen::contains(const std::string& tensorName) const {
     return metas_.find(tensorName) != metas_.end();
 }
 
-TensorView SafeOpen::getTensor(const std::string& tensorName) const {
+TensorView SafeOpen::get_tensor(const std::string& tensorName) const {
     auto it = metas_.find(tensorName);
     if (it == metas_.end()) {
         throw std::runtime_error("safe_open: tensor not found: " + tensorName);
