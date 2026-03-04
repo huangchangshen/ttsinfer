@@ -126,9 +126,27 @@ public:
           inputs_()                
     {
         for (int s : shape_) numel_ *= s;
+        stride_.resize(shape_.size(), 1);
+        for (int i = static_cast<int>(shape_.size()) - 2; i >= 0; --i) {
+            stride_[static_cast<size_t>(i)] =
+                stride_[static_cast<size_t>(i + 1)] * shape_[static_cast<size_t>(i + 1)];
+        }
 
         storage_ = IntrusivePtr<Storage>(new Storage(numel_ * sizeof(float)));
     }
+
+    TensorImpl(std::vector<int> shape,
+               std::vector<int> stride,
+               size_t numel,
+               DType dt,
+               const IntrusivePtr<Storage>& storage)
+        : shape_(std::move(shape)),
+          stride_(std::move(stride)),
+          numel_(numel),
+          dtype_(dt),
+          storage_(storage),
+          op_(OpType::NONE),
+          inputs_() {}
 
     float* data() {
         return static_cast<float*>(storage_->data_);
@@ -209,6 +227,10 @@ public:
         return impl_->shape_;
     }
 
+    const std::vector<int>& stride() const {
+        return impl_->stride_;
+    }
+
     TensorImpl* unsafe_get_impl() { return impl_.get(); }
     TensorImpl* unsafe_get_impl() const { return impl_.get(); }
 
@@ -283,11 +305,101 @@ inline Tensor relu(const Tensor& X) {
     return Tensor::make(OpType::RELU, X.shape(), DType::F32, {X});
 }
 
-inline Tensor transpose(const Tensor& X) {
-    if (X.shape().size() != 2)
-        throw std::runtime_error("transpose only supports 2D");
+inline Tensor reshape(const Tensor& X, const std::vector<int>& new_shape) {
+    TensorImpl* impl = X.unsafe_get_impl();
+    if (!impl) {
+        throw std::runtime_error("reshape on null tensor");
+    }
+    if (new_shape.empty()) {
+        throw std::runtime_error("reshape requires non-empty shape");
+    }
 
-    return Tensor::make(OpType::TRANSPOSE, {X.shape()[1], X.shape()[0]}, DType::F32, {X});
+    size_t target_numel = 1;
+    for (int dim : new_shape) {
+        if (dim <= 0) {
+            throw std::runtime_error("reshape requires positive dims");
+        }
+        target_numel *= static_cast<size_t>(dim);
+    }
+    if (target_numel != impl->numel_) {
+        throw std::runtime_error("reshape numel mismatch");
+    }
+
+    std::vector<int> expected(impl->shape_.size(), 1);
+    for (int i = static_cast<int>(impl->shape_.size()) - 2; i >= 0; --i) {
+        expected[static_cast<size_t>(i)] =
+            expected[static_cast<size_t>(i + 1)] * impl->shape_[static_cast<size_t>(i + 1)];
+    }
+    if (expected != impl->stride_) {
+        throw std::runtime_error("reshape only supports contiguous tensor");
+    }
+
+    std::vector<int> new_stride(new_shape.size(), 1);
+    for (int i = static_cast<int>(new_shape.size()) - 2; i >= 0; --i) {
+        new_stride[static_cast<size_t>(i)] =
+            new_stride[static_cast<size_t>(i + 1)] * new_shape[static_cast<size_t>(i + 1)];
+    }
+
+    return Tensor(new TensorImpl(new_shape, new_stride, impl->numel_, impl->dtype_, impl->storage_));
+}
+
+inline Tensor permute(const Tensor& X, const std::vector<int>& dims) {
+    TensorImpl* impl = X.unsafe_get_impl();
+    if (!impl) {
+        throw std::runtime_error("permute on null tensor");
+    }
+    if (dims.size() != impl->shape_.size()) {
+        throw std::runtime_error("permute dims size mismatch");
+    }
+
+    std::vector<int> seen(dims.size(), 0);
+    std::vector<int> new_shape(dims.size(), 0);
+    std::vector<int> new_stride(dims.size(), 0);
+    for (size_t i = 0; i < dims.size(); ++i) {
+        int d = dims[i];
+        if (d < 0 || d >= static_cast<int>(dims.size()) || seen[static_cast<size_t>(d)] != 0) {
+            throw std::runtime_error("permute dims must be a permutation");
+        }
+        seen[static_cast<size_t>(d)] = 1;
+        new_shape[i] = impl->shape_[static_cast<size_t>(d)];
+        new_stride[i] = impl->stride_[static_cast<size_t>(d)];
+    }
+
+    return Tensor(new TensorImpl(new_shape, new_stride, impl->numel_, impl->dtype_, impl->storage_));
+}
+
+inline Tensor transpose(const Tensor& X) {
+    TensorImpl* impl = X.unsafe_get_impl();
+    if (!impl) {
+        throw std::runtime_error("transpose on null tensor");
+    }
+    if (impl->shape_.size() < 2) {
+        throw std::runtime_error("transpose requires tensor dim >= 2");
+    }
+
+    std::vector<int> dims(impl->shape_.size());
+    for (size_t i = 0; i < dims.size(); ++i) {
+        dims[i] = static_cast<int>(i);
+    }
+    std::swap(dims[dims.size() - 1], dims[dims.size() - 2]);
+    return permute(X, dims);
+}
+
+inline Tensor transpose(const Tensor& X, int dim0, int dim1) {
+    TensorImpl* impl = X.unsafe_get_impl();
+    if (!impl) {
+        throw std::runtime_error("transpose on null tensor");
+    }
+    const int ndim = static_cast<int>(impl->shape_.size());
+    if (dim0 < 0 || dim0 >= ndim || dim1 < 0 || dim1 >= ndim) {
+        throw std::runtime_error("transpose dim out of range");
+    }
+    std::vector<int> dims(static_cast<size_t>(ndim));
+    for (int i = 0; i < ndim; ++i) {
+        dims[static_cast<size_t>(i)] = i;
+    }
+    std::swap(dims[static_cast<size_t>(dim0)], dims[static_cast<size_t>(dim1)]);
+    return permute(X, dims);
 }
 
 inline Tensor softmax(const Tensor& X) {
