@@ -11,8 +11,8 @@ add_library(ttsinfer
     src/json.cpp
     src/safetensors.cpp
     src/graph.cpp
+    src/bpe.cpp
 )
 
 enable_testing()
 add_subdirectory(tests)
-
